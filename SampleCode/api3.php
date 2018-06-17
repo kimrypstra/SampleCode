@@ -1,6 +1,8 @@
 <?php
 
-// This is the web service that Unitrans uses. Initially I wasn't sure if I would use Google Translate or Microsoft Translate. I ended up going with Google, but I left the Microsoft stuff in just in case I changed my mind. 
+// This is the web service that Unitrans uses. Initially I wasn't sure if I would use Google Translate or Microsoft Translate. 
+// I ended up going with Google, but I left the Microsoft stuff in just in case I changed my mind. 
+
 
 function translateWithGoogle($text, $from, $to) {
 	try {	
@@ -8,17 +10,15 @@ function translateWithGoogle($text, $from, $to) {
 		$key = "";
 		// Add your key here...
 		$url = "https://www.googleapis.com/language/translate/v2";
-	//$from = "en";
-	//$to = "es";
+		//$from = "en";
+		//$to = "es";
 		$params = "key=".urlencode($key)."&q=".urlencode($text)."&source=".urlencode($from)."&target=".urlencode($to);
-
 		$url .= "?".$params;
 
 		curl_setopt($request, CURLOPT_URL, $url);
 		curl_setopt($request, CURLOPT_RETURNTRANSFER, true);
 
 		$response = curl_exec($request);
-
 		$curlErrno = curl_errno($request);
 		if ($curlErrno) {
 			$curlError = curl_error($request);
@@ -28,11 +28,11 @@ function translateWithGoogle($text, $from, $to) {
 		curl_close($request);
 
 		$obj = json_decode($response);
-		//$xmlObj = simplexml_load_string($response);
 
 		return $obj;
 
 	} catch (Exception $e) {
+		// If something goes wrong, log the error with Google Analytics
 		echo "Exception: " . $e->getMessage() . PHP_EOL;
 		$error = new ssga('UA-83306480-2', 'http://api.disordersoftware.com');
 		$error->set_event('Errors',$e, '','');
@@ -43,58 +43,54 @@ function translateWithGoogle($text, $from, $to) {
 }
 
 function translateWithMicrosoft($text, $from, $to, $v){
-
-	//$languages = updateLanguageList();
-	
+	// First, get a token
 	$token = checkToken();
 
-try {	
-	$request = curl_init();
-	$authHeader = array("Authorization: Bearer ". $token);
-	
-	$url = "http://api.microsofttranslator.com/V2/Http.svc/Translate";
-	//$from = "en";
-	//$to = "es";
-	$params = "text=".urlencode($text)."&to=".urlencode($to)."&from=".urlencode($from)."&contentType=text/plain";
-	
-	$url .= "?".$params;
-	
-	curl_setopt($request, CURLOPT_URL, $url);
-	curl_setopt($request, CURLOPT_HTTPHEADER, $authHeader);
-	curl_setopt($request, CURLOPT_RETURNTRANSFER, true);
-	
-	$response = curl_exec($request);
-	
-	$curlErrno = curl_errno($request);
-	if ($curlErrno) {
-		$curlError = curl_error($request);
+	try {	
+		$request = curl_init();
+		$authHeader = array("Authorization: Bearer ". $token);
+		$url = "http://api.microsofttranslator.com/V2/Http.svc/Translate";
+		//$from = "en";
+		//$to = "es";
+		$params = "text=".urlencode($text)."&to=".urlencode($to)."&from=".urlencode($from)."&contentType=text/plain";
+		$url .= "?".$params;
+		
+		curl_setopt($request, CURLOPT_URL, $url);
+		curl_setopt($request, CURLOPT_HTTPHEADER, $authHeader);
+		curl_setopt($request, CURLOPT_RETURNTRANSFER, true);
+		
+		$response = curl_exec($request);
+		
+		$curlErrno = curl_errno($request);
+		if ($curlErrno) {
+			// If something goes wrong, log it with Google Analytics
+			$curlError = curl_error($request);
+			$error = new ssga('UA-83306480-2', 'http://api.disordersoftware.com');
+			$error->set_event('Errors',$curlError, '','');
+			$error->send();
+			$error->reset();
+			throw new Exception($curlError);
+		}
+		
+		curl_close($request);	
+
+		$xmlObj = simplexml_load_string($response);
+		return $xmlObj;
+		
+	} catch (Exception $e) {
+		echo "Exception: " . $e->getMessage() . PHP_EOL;
 		$error = new ssga('UA-83306480-2', 'http://api.disordersoftware.com');
-		$error->set_event('Errors',$curlError, '','');
+		$error->set_event('Errors',$e, '','');
 		$error->send();
 		$error->reset();
-		throw new Exception($curlError);
 	}
-	
-	curl_close($request);
-	
-	$obj = json_decode($response);
-	$xmlObj = simplexml_load_string($response);
-	
-	return $xmlObj;
-	
-} catch (Exception $e) {
-	echo "Exception: " . $e->getMessage() . PHP_EOL;
-	$error = new ssga('UA-83306480-2', 'http://api.disordersoftware.com');
-	$error->set_event('Errors',$e, '','');
-	$error->send();
-	$error->reset();
-}
-	
 }
 
 function getToken() {
 	require_once('../../../mysqli_connect_unitrans.php');
 	
+	// This is used to force a new token if the one received is expired (tokens were updated automatically using a cron job)
+
 	// Set up the cURL request
 	$paramArray = array(
 		"client_id" => "",
@@ -123,6 +119,7 @@ function getToken() {
 	$token = $jsonResponse->access_token;
 	
 	// Put the token into the database
+	// I had intended to change from mysqli to PDO but never got around to it
 	$newRecordQueryString = "INSERT INTO tokens (token, epoch, new_requested) VALUES (?, ?, ?)";
 	$stmt = mysqli_prepare($dbc, $newRecordQueryString);
 	$false = 'F';
@@ -140,6 +137,7 @@ function getToken() {
 }
 
 function checkToken() {
+	// This is used to get the latest token for the Microsoft Translate API. 
 	require_once('../../../mysqli_connect_unitrans.php');
 	
 	$query = "SELECT * FROM tokens ORDER BY epoch DESC LIMIT 1";
@@ -175,6 +173,8 @@ function checkToken() {
 
 }
 
+// A URL parameter determined whether to use Google or Microsoft to translate the text. 
+// I wish I had commented this more clearly when I wrote it, because I have no idea what $v is for.
 if(isset($_GET["action"])){
 	switch($_GET["v"]){
 		case "g":
